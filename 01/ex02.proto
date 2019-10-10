@@ -1,0 +1,3 @@
+message Test2 {
+  optional string b = 2;
+}

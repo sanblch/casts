@@ -1,0 +1,5 @@
+import "ex01.proto";
+
+message Test3 {
+  optional Test1 c = 3;
+}

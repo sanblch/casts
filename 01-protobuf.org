@@ -1,0 +1,257 @@
+* Introduction
+** Proto body
+  #+begin_src protobuf
+    syntax = "proto2";
+
+    package tutorial;
+
+    message Person {
+      required string name = 1;
+      required int32 id = 2;
+      optional string email = 3;
+
+      enum PhoneType {
+        MOBILE = 0;
+        HOME = 1;
+        WORK = 2;
+      }
+
+      message PhoneNumber {
+        required string number = 1;
+        optional PhoneType type = 2 [default = HOME];
+      }
+
+      repeated PhoneNumber phones = 4;
+    }
+
+    message AddressBook {
+      repeated Person people = 1;
+    }
+  #+end_src
+** Usage
+#+begin_src c++
+  // See README.txt for information and build instructions.
+
+  #include <ctime>
+  #include <fstream>
+  #include <google/protobuf/util/time_util.h>
+  #include <iostream>
+  #include <string>
+
+  #include "addressbook.pb.h"
+
+  using namespace std;
+
+  using google::protobuf::util::TimeUtil;
+
+  // This function fills in a Person message based on user input.
+  void PromptForAddress(tutorial::Person* person) {
+    cout << "Enter person ID number: ";
+    int id;
+    cin >> id;
+    person->set_id(id);
+    cin.ignore(256, '\n');
+
+    cout << "Enter name: ";
+    getline(cin, *person->mutable_name());
+
+    cout << "Enter email address (blank for none): ";
+    string email;
+    getline(cin, email);
+    if (!email.empty()) {
+      person->set_email(email);
+    }
+
+    while (true) {
+      cout << "Enter a phone number (or leave blank to finish): ";
+      string number;
+      getline(cin, number);
+      if (number.empty()) {
+        break;
+      }
+
+      tutorial::Person::PhoneNumber* phone_number = person->add_phones();
+      phone_number->set_number(number);
+
+      cout << "Is this a mobile, home, or work phone? ";
+      string type;
+      getline(cin, type);
+      if (type == "mobile") {
+        phone_number->set_type(tutorial::Person::MOBILE);
+      } else if (type == "home") {
+        phone_number->set_type(tutorial::Person::HOME);
+      } else if (type == "work") {
+        phone_number->set_type(tutorial::Person::WORK);
+      } else {
+        cout << "Unknown phone type.  Using default." << endl;
+      }
+    }
+    ,*person->mutable_last_updated() = TimeUtil::SecondsToTimestamp(time(NULL));
+  }
+
+  // Main function:  Reads the entire address book from a file,
+  //   adds one person based on user input, then writes it back out to the same
+  //   file.
+  int main(int argc, char* argv[]) {
+    // Verify that the version of the library that we linked against is
+    // compatible with the version of the headers we compiled against.
+    GOOGLE_PROTOBUF_VERIFY_VERSION;
+
+    if (argc != 2) {
+      cerr << "Usage:  " << argv[0] << " ADDRESS_BOOK_FILE" << endl;
+      return -1;
+    }
+
+    tutorial::AddressBook address_book;
+
+    {
+      // Read the existing address book.
+      fstream input(argv[1], ios::in | ios::binary);
+      if (!input) {
+        cout << argv[1] << ": File not found.  Creating a new file." << endl;
+      } else if (!address_book.ParseFromIstream(&input)) {
+        cerr << "Failed to parse address book." << endl;
+        return -1;
+      }
+    }
+
+    // Add an address.
+    PromptForAddress(address_book.add_people());
+
+    {
+      // Write the new address book back to disk.
+      fstream output(argv[1], ios::out | ios::trunc | ios::binary);
+      if (!address_book.SerializeToOstream(&output)) {
+        cerr << "Failed to write address book." << endl;
+        return -1;
+      }
+    }
+
+    // Optional:  Delete all global objects allocated by libprotobuf.
+    google::protobuf::ShutdownProtobufLibrary();
+
+    return 0;
+  }
+#+end_src
+
+** Build
+#+begin_src cmake
+ # Minimum CMake required
+cmake_minimum_required(VERSION 2.8.12)
+
+# Project
+project(protobuf-examples)
+
+# Find required protobuf package
+find_package(protobuf CONFIG REQUIRED)
+
+if(protobuf_VERBOSE)
+  message(STATUS "Using Protocol Buffers ${Protobuf_VERSION}")
+endif()
+
+set(CMAKE_INCLUDE_CURRENT_DIR TRUE)
+
+# http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
+if(MSVC AND protobuf_MSVC_STATIC_RUNTIME)
+  foreach(flag_var
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    if(${flag_var} MATCHES "/MD")
+      string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+    endif(${flag_var} MATCHES "/MD")
+  endforeach()
+endif()
+
+foreach(example add_person list_people)
+  set(${example}_SRCS ${example}.cc)
+  set(${example}_PROTOS addressbook.proto)
+
+  #Code Generation
+  if(protobuf_MODULE_COMPATIBLE) #Legacy Support
+    protobuf_generate_cpp(${example}_PROTO_SRCS ${example}_PROTO_HDRS ${${example}_PROTOS})
+    list(APPEND ${example}_SRCS ${${example}_PROTO_SRCS} ${${example}_PROTO_HDRS})
+  endif()
+
+  #Executable setup
+  set(executable_name ${example}_cpp)
+  add_executable(${executable_name} ${${example}_SRCS} ${${example}_PROTOS})
+  if(protobuf_MODULE_COMPATIBLE) #Legacy mode
+    target_include_directories(${executable_name} PUBLIC ${PROTOBUF_INCLUDE_DIRS})
+    target_link_libraries(${executable_name} ${PROTOBUF_LIBRARIES})
+  else()
+    target_link_libraries(${executable_name} protobuf::libprotobuf)
+    protobuf_generate(TARGET ${executable_name})
+  endif()
+
+endforeach()
+#+end_src
+* Binary Representation
+** Base 128 Varints
+*** one
+    0000 0001
+*** 300
+    1010 1100 0000 0010
+**** leave lower bits
+     010 1100  000 0010
+**** reverse
+     000 0010  010 1100
+**** concatenate
+     100101100
+     2^7 + 2^5 + 2^3 + 2^2
+     256 + 32 + 8 + 4
+     300
+** Field types
+   0 | Varint
+   1 | 64-bit
+   2 | Length-delimited
+   ...
+   5 | 32-bit
+**** example ex01
+          08       96        01
+    000 1000 001 0110 0000 0001
+**** example ex02
+    12 07 74 65 73 74 69 6e 67
+**** example ex03
+    1a 03 08 96 01
+* Message structure
+** Version compatibility
+
+* Additional features
+** Extensions
+#+begin_src protobuf
+  message Foo {
+      // ...
+      extensions 100 to 199;
+  }
+  extend Foo {
+    optional int32 bar = 126;
+  }
+#+end_src
+#+begin_src c++
+  Foo foo;
+  foo.SetExtension(bar, 15);
+#+end_src
+** Oneof
+#+begin_src protobuf
+message SampleMessage {
+  oneof test_oneof {
+     string name = 4;
+     SubMessage sub_message = 9;
+  }
+}
+#+end_src
+** Map
+#+begin_src protobuf
+  map<string, Project> projects = 3;
+#+end_src
+#+begin_src protobuf
+  message MapFieldEntry {
+    optional key_type key = 1;
+    optional value_type value = 2;
+  }
+
+  repeated MapFieldEntry map_field = N;
+#+end_src
+** Options
+* C++ API
+** Reflection
