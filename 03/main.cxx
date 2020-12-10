@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
 
   auto layout = new QVBoxLayout;
 
-  py::object obj = py::module::import("foobar").attr("FooBar")();
+  py::object obj = py::module::import("barfoo").attr("BarFoo")();
   py::tuple tupl = py::module::import("shiboken2").attr("getCppPointer")(obj);
   layout->addWidget(reinterpret_cast<QWidget*>(tupl[0].cast<size_t>()));
 

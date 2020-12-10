@@ -14,7 +14,7 @@ include(packages)
 include(${CMAKE_BINARY_DIR}/conan_paths.cmake)
 
 
-find_package(Qt5 5.15 COMPONENTS Widgets CONFIG REQUIRED)
+find_package(Qt5 5.15.0 EXACT COMPONENTS Widgets CONFIG REQUIRED)
 
 add_library(hybrid-library
   qt-core.cxx
